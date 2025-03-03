@@ -65,12 +65,12 @@ contract DscEngineTest is Test, CodeConstants, Events {
     }
 
     function testGetTokenAmountFromUsd() public view {
-        uint256 usdAmount = 100 ether; 
-        (, int256 expectedUsdValue,,,) = AggregatorV3Interface(wethUsdPriceFeed).latestRoundData(); 
-        uint256 feedPrecision = 1e10; 
-        uint256 expectedTokenFromUsdAmount = (usdAmount * PRECISION) / (uint256(expectedUsdValue) * feedPrecision); 
-        uint256 actualTokenFromUsdAmount = dscEngine.getTokenAmountFromUsd(weth, usdAmount); 
-        assertEq(expectedTokenFromUsdAmount, actualTokenFromUsdAmount); 
+        uint256 usdAmount = 100 ether;
+        (, int256 expectedUsdValue,,,) = AggregatorV3Interface(wethUsdPriceFeed).latestRoundData();
+        uint256 feedPrecision = 1e10;
+        uint256 expectedTokenFromUsdAmount = (usdAmount * PRECISION) / (uint256(expectedUsdValue) * feedPrecision);
+        uint256 actualTokenFromUsdAmount = dscEngine.getTokenAmountFromUsd(weth, usdAmount);
+        assertEq(expectedTokenFromUsdAmount, actualTokenFromUsdAmount);
     }
 
     // depositCollateral tests
@@ -150,67 +150,68 @@ contract DscEngineTest is Test, CodeConstants, Events {
     function testmintDscUpdatesDataStructures() public depositWethAndWbtcForUser(WETH_BALANCE) {
         uint256 depositAmount = WETH_BALANCE;
         uint256 totalCollateralValue = dscEngine.getUsdValue(weth, depositAmount);
-        uint256 expectedDscMinted = totalCollateralValue / 2; 
+        uint256 expectedDscMinted = totalCollateralValue / 2;
         vm.startPrank(user);
         dscEngine.depositCollateral(weth, depositAmount);
         dscEngine.mintDsc(expectedDscMinted);
-        uint256 actualDscMinted = dscEngine.getDscMinted(user);        
+        uint256 actualDscMinted = dscEngine.getDscMinted(user);
         vm.stopPrank();
-        uint256 userDscBalance = dsc.balanceOf(user); 
-        assertEq(expectedDscMinted, actualDscMinted); 
-        assertEq(actualDscMinted, userDscBalance); 
+        uint256 userDscBalance = dsc.balanceOf(user);
+        assertEq(expectedDscMinted, actualDscMinted);
+        assertEq(actualDscMinted, userDscBalance);
     }
 
     //redeemCollateral tests
-    function testRedeemCollateralRevertsWhenRequestedCollateralMoreThanDepositedCollateral() public depositWethAndWbtcForUser(WETH_BALANCE) {
-        uint256 depositAmount = WETH_BALANCE; 
-        vm.startPrank(user);
-        dscEngine.depositCollateral(weth, depositAmount); 
-        vm.expectRevert(); 
-        dscEngine.redeemCollateral(weth, depositAmount + 1);  
-        vm.stopPrank();     
-    }
-
-
-    function testRedeemCollateralEmitsCollateralRedeemed() public depositWethAndWbtcForUser(WETH_BALANCE) {
-        uint256 depositAmount = WETH_BALANCE; 
+    function testRedeemCollateralRevertsWhenRequestedCollateralMoreThanDepositedCollateral()
+        public
+        depositWethAndWbtcForUser(WETH_BALANCE)
+    {
+        uint256 depositAmount = WETH_BALANCE;
         vm.startPrank(user);
         dscEngine.depositCollateral(weth, depositAmount);
-        vm.expectEmit(address(dscEngine));  
-        emit CollateralRedeemed(user, user, weth, depositAmount); 
-        dscEngine.redeemCollateral(weth, depositAmount);  
+        vm.expectRevert();
+        dscEngine.redeemCollateral(weth, depositAmount + 1);
+        vm.stopPrank();
+    }
+
+    function testRedeemCollateralEmitsCollateralRedeemed() public depositWethAndWbtcForUser(WETH_BALANCE) {
+        uint256 depositAmount = WETH_BALANCE;
+        vm.startPrank(user);
+        dscEngine.depositCollateral(weth, depositAmount);
+        vm.expectEmit(address(dscEngine));
+        emit CollateralRedeemed(user, user, weth, depositAmount);
+        dscEngine.redeemCollateral(weth, depositAmount);
         vm.stopPrank();
     }
 
     function testRedeemCollateralRevertsWhenHealthFactorIsBroken() public depositWethAndWbtcForUser(WETH_BALANCE) {
-        uint256 depositAmount = WETH_BALANCE; 
+        uint256 depositAmount = WETH_BALANCE;
         uint256 totalCollateralValue = dscEngine.getUsdValue(weth, depositAmount);
         uint256 expectedDscMinted = totalCollateralValue / 2;
         vm.startPrank(user);
         dscEngine.depositCollateral(weth, depositAmount);
-        dscEngine.mintDsc(expectedDscMinted); 
+        dscEngine.mintDsc(expectedDscMinted);
         vm.expectRevert(DSCEngine.DSCEngine__BreaksHealthFactor.selector);
-        dscEngine.redeemCollateral(weth, depositAmount/2);  
+        dscEngine.redeemCollateral(weth, depositAmount / 2);
         vm.stopPrank();
     }
 
     //burn dsc tests
     function testBurnDscRevertsForZeroAmountBurn() public {
         vm.prank(user);
-        vm.expectRevert(DSCEngine.DSCEngine__AmountMustBeMoreThanZero.selector); 
-        dscEngine.burnDsc(0); 
+        vm.expectRevert(DSCEngine.DSCEngine__AmountMustBeMoreThanZero.selector);
+        dscEngine.burnDsc(0);
     }
 
     function testBurnDscRevertsWhenBurnAmountMoreThanMinted() public depositWethAndWbtcForUser(WETH_BALANCE) {
-        uint256 depositAmount = WETH_BALANCE; 
+        uint256 depositAmount = WETH_BALANCE;
         uint256 totalCollateralValue = dscEngine.getUsdValue(weth, depositAmount);
         uint256 expectedDscMinted = totalCollateralValue / 2;
         vm.startPrank(user);
         dscEngine.depositCollateral(weth, depositAmount);
-        dscEngine.mintDsc(expectedDscMinted); 
-        vm.expectRevert(); 
+        dscEngine.mintDsc(expectedDscMinted);
+        vm.expectRevert();
         dscEngine.burnDsc(expectedDscMinted + 1);
         vm.stopPrank();
     }
-
 }
