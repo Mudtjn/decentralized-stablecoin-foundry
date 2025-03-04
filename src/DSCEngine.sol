@@ -90,8 +90,9 @@ contract DSCEngine is ReentrancyGuard {
     function redeemCollateralForDsc(address tokenCollateralAddress, uint256 amountCollateral, uint256 amountDscToBurn)
         external
     {
-        burnDsc(amountDscToBurn);
-        redeemCollateral(tokenCollateralAddress, amountCollateral);
+        _burnDsc(amountDscToBurn, msg.sender, msg.sender);
+        _redeemCollateral(tokenCollateralAddress, amountCollateral, msg.sender, msg.sender);
+        _revertIfHealthFactorIsBroken(msg.sender);
     }
 
     function redeemCollateral(address tokenCollateralAddress, uint256 amount) public moreThanZero(amount) {
@@ -116,7 +117,7 @@ contract DSCEngine is ReentrancyGuard {
     }
 
     /**
-     * @param tokenCollateralAddress address to liquuidate from user
+     * @param tokenCollateralAddress address to liquidate from user
      * @param user user to liquidate. The user's health factor should be below MIN_HEALTH_FACTOR
      * @param debtToCover total debt to cover
      * @notice you can partially liquidate user
@@ -145,8 +146,8 @@ contract DSCEngine is ReentrancyGuard {
         _revertIfHealthFactorIsBroken(msg.sender);
     }
 
-    function getHealthFactor() external view returns (uint256) {
-        return _healthFactor(msg.sender);
+    function getHealthFactor(address user) external view returns (uint256) {
+        return _healthFactor(user);
     }
 
     /// internal functions

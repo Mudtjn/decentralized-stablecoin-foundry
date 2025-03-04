@@ -10,6 +10,7 @@ import {MockFailedTransfer} from "../mocks/MockFailedTransfer.sol";
 import {ERC20Mock} from "../mocks/ERC20Mock.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import {Events} from "../Events.t.sol";
+import {MockV3Aggregator} from "../mocks/MockV3Aggregator.sol";
 
 contract DscEngineTest is Test, CodeConstants, Events {
     HelperConfig public helperConfig;
@@ -20,6 +21,7 @@ contract DscEngineTest is Test, CodeConstants, Events {
     address wbtcUsdPriceFeed;
     address wbtc;
     address user = makeAddr("user");
+    address liquidator = makeAddr("liquidator");
 
     uint256 public constant WETH_BALANCE = 10e18;
     uint256 public constant WBTC_BALANCE = 10e18;
@@ -74,7 +76,6 @@ contract DscEngineTest is Test, CodeConstants, Events {
     }
 
     // depositCollateral tests
-
     function testRevertsIfDepositCollateralIsZero() public depositWethAndWbtcForUser(WETH_BALANCE) {
         vm.startPrank(user);
         vm.expectRevert(DSCEngine.DSCEngine__AmountMustBeMoreThanZero.selector);
@@ -124,8 +125,20 @@ contract DscEngineTest is Test, CodeConstants, Events {
         vm.startPrank(user);
         dscEngine.depositCollateral(weth, WETH_BALANCE / 10);
         vm.stopPrank();
-        uint256 healthFactor = dscEngine.getHealthFactor();
+        uint256 healthFactor = dscEngine.getHealthFactor(user);
         assertEq(healthFactor, dscEngine.HEALTH_FACTOR_IN_CASE_NO_DSC_MINTED());
+    }
+
+    // depositCollateralAndMintDSCtests
+    function testDepositCollateralAndMintDscRevertsInCaseHealthFactorBreaks()
+        public
+        depositWethAndWbtcForUser(WETH_BALANCE)
+    {
+        uint256 depositAmount = WETH_BALANCE;
+        uint256 maxDscToMint = dscEngine.getUsdValue(weth, depositAmount) / 2;
+        vm.prank(user);
+        vm.expectRevert(DSCEngine.DSCEngine__BreaksHealthFactor.selector);
+        dscEngine.depositCollateralAndMintDsc(weth, depositAmount, maxDscToMint + 1);
     }
 
     // mintDsc tests
@@ -213,5 +226,82 @@ contract DscEngineTest is Test, CodeConstants, Events {
         vm.expectRevert();
         dscEngine.burnDsc(expectedDscMinted + 1);
         vm.stopPrank();
+    }
+
+    function testBurnDscUpdatesDataStructures() public depositWethAndWbtcForUser(WETH_BALANCE) {
+        uint256 depositAmount = WETH_BALANCE;
+        uint256 totalCollateralValue = dscEngine.getUsdValue(weth, depositAmount);
+        uint256 expectedDscMinted = totalCollateralValue / 2;
+        vm.startPrank(user);
+        dscEngine.depositCollateral(weth, depositAmount);
+        dscEngine.mintDsc(expectedDscMinted);
+        dsc.approve(address(dscEngine), expectedDscMinted);
+        dscEngine.burnDsc(expectedDscMinted);
+        vm.stopPrank();
+        uint256 endingUserDsc = dscEngine.getDscMinted(user);
+        uint256 endingUserDscBalance = dsc.balanceOf(address(dscEngine));
+        assertEq(endingUserDsc, 0);
+        assertEq(endingUserDscBalance, 0);
+    }
+
+    // redeemCollateralForDsc tests
+    // will not break as this needs liquidator as intermediary
+    // function testRedeemCollateralForDscRevertsIfHealthFactorBreaks() public depositWethAndWbtcForUser(WETH_BALANCE) {
+    //     uint256 depositAmount = WETH_BALANCE;
+    //     uint256 dscToMint = dscEngine.getUsdValue(weth, depositAmount) / 2;
+    //     vm.startPrank(user);
+    //     dscEngine.depositCollateral(weth, depositAmount);
+    //     dscEngine.mintDsc(dscToMint);
+    //     MockV3Aggregator(wethUsdPriceFeed).updateAnswer(3000e18);
+    //     uint256 userDscBalance = dsc.balanceOf(user);
+    //     dsc.approve(address(dscEngine), userDscBalance);
+    //     vm.expectRevert(DSCEngine.DSCEngine__BreaksHealthFactor.selector);
+    //     dscEngine.redeemCollateralForDsc(weth, depositAmount, userDscBalance);
+    //     vm.stopPrank();
+    // }
+
+    function testRedeemCollateralForDscUpdatesDataStructures() public depositWethAndWbtcForUser(WETH_BALANCE) {
+        uint256 depositAmount = WETH_BALANCE;
+        uint256 dscToMint = dscEngine.getUsdValue(weth, depositAmount) / 2;
+        vm.startPrank(user);
+        dscEngine.depositCollateralAndMintDsc(weth, depositAmount, dscToMint);
+        uint256 initialUserWethBalance = ERC20Mock(weth).balanceOf(user);
+        dsc.approve(address(dscEngine), dscToMint);
+        dscEngine.redeemCollateralForDsc(weth, depositAmount, dscToMint);
+        uint256 finalUserWethBalance = ERC20Mock(weth).balanceOf(user);
+        vm.stopPrank();
+        assertEq(dscEngine.getDscMinted(user), 0);
+        assertEq(dsc.balanceOf(user), 0);
+        assertEq(dscEngine.getCollateralDeposited(user, weth), 0);
+        assertEq(finalUserWethBalance - initialUserWethBalance, depositAmount);
+    }
+
+    // liquidator tests
+    function testLiquidateRevertsForUserWithSafeHealthFactor() public depositWethAndWbtcForUser(WETH_BALANCE) {
+        uint256 depositAmount = WETH_BALANCE;
+        uint256 dscToMint = dscEngine.getUsdValue(weth, depositAmount) / 2;
+        vm.prank(user);
+        dscEngine.depositCollateralAndMintDsc(weth, depositAmount, dscToMint);
+        uint256 debtToCover = dscEngine.getDscMinted(user);
+        vm.prank(liquidator);
+        vm.expectRevert(DSCEngine.DSCEngine__HealthFactorOk.selector);
+        dscEngine.liquidate(weth, user, debtToCover);
+    }
+
+    function depositCollateralAndMintTokens() internal {
+        uint256 depositAmount = WETH_BALANCE;
+        uint256 dscToMint = dscEngine.getUsdValue(weth, depositAmount) / 2;
+        vm.prank(user);
+        dscEngine.depositCollateralAndMintDsc(weth, depositAmount, dscToMint);
+    }
+
+    function testGetHealthFactorGetsLessWhenOraclePriceChange() public depositWethAndWbtcForUser(WETH_BALANCE) {
+        //setup
+        depositCollateralAndMintTokens();
+        uint256 initialHealthFactor = dscEngine.getHealthFactor(user);
+        MockV3Aggregator(wethUsdPriceFeed).updateAnswer(500e8);
+        uint256 finalHealthFactor = dscEngine.getHealthFactor(user);
+        assert(finalHealthFactor < initialHealthFactor);
+        assert(finalHealthFactor < dscEngine.MIN_HEALTH_FACTOR());
     }
 }
